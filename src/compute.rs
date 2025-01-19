@@ -12,10 +12,10 @@ use bevy::{
 };
 use std::borrow::Cow;
 
-use crate::{HEIGHTMAP_HEIGHT, HEIGHTMAP_WIDTH};
+use crate::{TERRAINMAP_HEIGHT, TERRAINMAP_WIDTH};
 
 const SHADER_ASSET_PATH: &str = "compute.wgsl";
-const SIZE: (u32, u32) = (HEIGHTMAP_WIDTH, HEIGHTMAP_HEIGHT);
+const SIZE: (u32, u32) = (TERRAINMAP_WIDTH, TERRAINMAP_HEIGHT);
 const WORKGROUP_SIZE: u32 = 1;
 
 pub struct TerrainComputePlugin;
@@ -52,10 +52,10 @@ impl Plugin for TerrainComputePlugin {
 
 #[derive(Resource, Clone, ExtractResource)]
 pub struct ComputeTerrainImages {
-    pub heightmap_a: Handle<Image>,
+    pub terrainmap_a: Handle<Image>,
     pub flowmap_a: Handle<Image>,
     pub velocitymap_a: Handle<Image>,
-    pub heightmap_b: Handle<Image>,
+    pub terrainmap_b: Handle<Image>,
     pub flowmap_b: Handle<Image>,
     pub velocitymap_b: Handle<Image>,
 }
@@ -70,12 +70,16 @@ fn prepare_bind_group(
     comptue_terrain_images: Res<ComputeTerrainImages>,
     render_device: Res<RenderDevice>,
 ) {
-    let heightmap_a = gpu_images.get(&comptue_terrain_images.heightmap_a).unwrap();
+    let terrainmap_a = gpu_images
+        .get(&comptue_terrain_images.terrainmap_a)
+        .unwrap();
     let flowmap_a = gpu_images.get(&comptue_terrain_images.flowmap_a).unwrap();
     let velocitymap_a = gpu_images
         .get(&comptue_terrain_images.velocitymap_a)
         .unwrap();
-    let heightmap_b = gpu_images.get(&comptue_terrain_images.heightmap_b).unwrap();
+    let terrainmap_b = gpu_images
+        .get(&comptue_terrain_images.terrainmap_b)
+        .unwrap();
     let flowmap_b = gpu_images.get(&comptue_terrain_images.flowmap_b).unwrap();
     let velocitymap_b = gpu_images
         .get(&comptue_terrain_images.velocitymap_b)
@@ -84,10 +88,10 @@ fn prepare_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
         &BindGroupEntries::sequential((
-            &heightmap_a.texture_view,
+            &terrainmap_a.texture_view,
             &flowmap_a.texture_view,
             &velocitymap_a.texture_view,
-            &heightmap_b.texture_view,
+            &terrainmap_b.texture_view,
             &flowmap_b.texture_view,
             &velocitymap_b.texture_view,
         )),
@@ -96,10 +100,10 @@ fn prepare_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
         &BindGroupEntries::sequential((
-            &heightmap_b.texture_view,
+            &terrainmap_b.texture_view,
             &flowmap_b.texture_view,
             &velocitymap_b.texture_view,
-            &heightmap_a.texture_view,
+            &terrainmap_a.texture_view,
             &flowmap_a.texture_view,
             &velocitymap_a.texture_view,
         )),

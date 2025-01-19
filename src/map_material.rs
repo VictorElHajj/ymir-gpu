@@ -9,7 +9,7 @@ use bevy::{
 pub struct MapMaterial {
     #[texture(0)]
     #[sampler(1)]
-    pub heightmap: Handle<Image>,
+    pub terrainmap: Handle<Image>,
     #[texture(3)]
     #[sampler(4)]
     pub flowmap: Handle<Image>,

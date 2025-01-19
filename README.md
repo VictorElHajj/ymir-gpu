@@ -6,3 +6,5 @@
 2. Hardcoded prevailing winds
 3. Evoporation from 1. moves according to 2. Only dropping water depending on air pressure / terrain (rain shadows)
 4. Moisture map
+
+Biome map using Whittaker biome map
