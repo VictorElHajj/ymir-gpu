@@ -114,8 +114,13 @@ fn prepare_bind_group(
 #[derive(Resource)]
 struct ComputeTerrainPipeline {
     texture_bind_group_layout: BindGroupLayout,
-    init_pipeline: CachedComputePipelineId,
-    update_pipeline: CachedComputePipelineId,
+    precipitation_pipeline: CachedComputePipelineId,
+    outflow_flux_pipeline: CachedComputePipelineId,
+    water_height_pipeline: CachedComputePipelineId,
+    velocity_field_pipeline: CachedComputePipelineId,
+    erosion_deposition_pipeline: CachedComputePipelineId,
+    sediment_transport_pipeline: CachedComputePipelineId,
+    evaporation_pipeline: CachedComputePipelineId,
 }
 
 impl FromWorld for ComputeTerrainPipeline {
@@ -136,37 +141,60 @@ impl FromWorld for ComputeTerrainPipeline {
             ),
         );
         let shader = world.load_asset(SHADER_ASSET_PATH);
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let init_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: None,
-            layout: vec![texture_bind_group_layout.clone()],
-            push_constant_ranges: Vec::new(),
-            shader: shader.clone(),
-            shader_defs: vec![],
-            entry_point: Cow::from("init"),
-            zero_initialize_workgroup_memory: false,
-        });
-        let update_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        let mut pipeline_descriptor = ComputePipelineDescriptor {
             label: None,
             layout: vec![texture_bind_group_layout.clone()],
             push_constant_ranges: Vec::new(),
             shader,
             shader_defs: vec![],
-            entry_point: Cow::from("update"),
+            entry_point: Cow::from(""),
             zero_initialize_workgroup_memory: false,
-        });
+        };
+        let pipeline_cache = world.resource::<PipelineCache>();
+
+        pipeline_descriptor.entry_point = Cow::from("_1_precipitation");
+        let precipitation_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_2_1_outflow_flux");
+        let outflow_flux_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_2_2_water_height");
+        let water_height_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_2_3_velocity_field");
+        let velocity_field_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_3_erosion_deposition");
+        let erosion_deposition_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_4_sediment_transport");
+        let sediment_transport_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
+        pipeline_descriptor.entry_point = Cow::from("_5_evaporation");
+        let evaporation_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
 
         ComputeTerrainPipeline {
             texture_bind_group_layout,
-            init_pipeline,
-            update_pipeline,
+            precipitation_pipeline,
+            outflow_flux_pipeline,
+            water_height_pipeline,
+            velocity_field_pipeline,
+            erosion_deposition_pipeline,
+            sediment_transport_pipeline,
+            evaporation_pipeline,
         }
     }
 }
 
 enum ComputeTerrainState {
     Loading,
-    Init,
     Update(usize),
 }
 
@@ -190,9 +218,9 @@ impl render_graph::Node for TerrainCompute {
         // if the corresponding pipeline has loaded, transition to the next stage
         match self.state {
             ComputeTerrainState::Loading => {
-                match pipeline_cache.get_compute_pipeline_state(pipeline.init_pipeline) {
+                match pipeline_cache.get_compute_pipeline_state(pipeline.precipitation_pipeline) {
                     CachedPipelineState::Ok(_) => {
-                        self.state = ComputeTerrainState::Init;
+                        self.state = ComputeTerrainState::Update(0);
                     }
                     CachedPipelineState::Err(err) => {
                         panic!("Initializing assets/{SHADER_ASSET_PATH}:\n{err}")
@@ -200,20 +228,7 @@ impl render_graph::Node for TerrainCompute {
                     _ => {}
                 }
             }
-            ComputeTerrainState::Init => {
-                if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline.update_pipeline)
-                {
-                    self.state = ComputeTerrainState::Update(1);
-                }
-            }
-            ComputeTerrainState::Update(0) => {
-                self.state = ComputeTerrainState::Update(1);
-            }
-            ComputeTerrainState::Update(1) => {
-                self.state = ComputeTerrainState::Update(0);
-            }
-            ComputeTerrainState::Update(_) => unreachable!(),
+            ComputeTerrainState::Update(_) => {}
         }
     }
 
@@ -226,35 +241,74 @@ impl render_graph::Node for TerrainCompute {
         let bind_groups = &world.get_resource::<ComputeTerrainBindGroups>();
         if let Some(bind_groups) = bind_groups {
             let pipeline_cache = world.resource::<PipelineCache>();
-            let pipeline = world.resource::<ComputeTerrainPipeline>();
+            let pipeline_resource = world.resource::<ComputeTerrainPipeline>();
 
-            let mut pass = render_context
-                .command_encoder()
-                .begin_compute_pass(&ComputePassDescriptor::default());
-
-            // select the pipeline based on the current state
             match self.state {
                 ComputeTerrainState::Loading => {}
-                ComputeTerrainState::Init => {
-                    let init_pipeline = pipeline_cache
-                        .get_compute_pipeline(pipeline.init_pipeline)
+                ComputeTerrainState::Update(mut index) => {
+                    // This is an ugly mess, but my first attempt at a multiple dispatch compute shader
+                    // Need to switch the input and output textures for each pass
+                    // TODO: Ask for code review, learn how to make this better
+
+                    let mut pass = render_context
+                        .command_encoder()
+                        .begin_compute_pass(&ComputePassDescriptor::default());
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let precipitation_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.precipitation_pipeline)
                         .unwrap();
-                    pass.set_bind_group(0, &bind_groups.0[0], &[]);
-                    pass.set_pipeline(init_pipeline);
+                    pass.set_pipeline(precipitation_pipeline);
                     pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-                }
-                ComputeTerrainState::Update(index) => {
-                    if let Some(update_pipeline) =
-                        pipeline_cache.get_compute_pipeline(pipeline.update_pipeline)
-                    {
-                        pass.set_bind_group(0, &bind_groups.0[index], &[]);
-                        pass.set_pipeline(update_pipeline);
-                        pass.dispatch_workgroups(
-                            SIZE.0 / WORKGROUP_SIZE,
-                            SIZE.1 / WORKGROUP_SIZE,
-                            1,
-                        );
-                    }
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let outflow_flux_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.outflow_flux_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(outflow_flux_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let water_height_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.water_height_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(water_height_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let velocity_field_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.velocity_field_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(velocity_field_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let erosion_deposition_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.erosion_deposition_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(erosion_deposition_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let sediment_transport_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.sediment_transport_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(sediment_transport_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    index = if index == 0 { 1 } else { 0 };
+                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                    let evaporation_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.evaporation_pipeline)
+                        .unwrap();
+                    pass.set_pipeline(evaporation_pipeline);
+                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
                 }
             }
         }
