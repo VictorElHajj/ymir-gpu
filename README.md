@@ -1,5 +1,6 @@
-1. Grid based GPU implementation of hydraulic erosion https://inria.hal.science/inria-00402079/document
+This is a implementation of the following paper using rust and bevy: Grid based GPU implementation of hydraulic erosion https://inria.hal.science/inria-00402079/document
 
+Future TODOs:
 - Loop around sides
 - Preserve total amount of water (evaporation is added to rain) to maintain oceans
 
@@ -8,3 +9,5 @@
 4. Moisture map
 
 Biome map using Whittaker biome map
+
+The implemented paper has several issues which can be fixed by using this paper in stead: https://old.cescg.org/CESCG-2011/papers/TUBudapest-Jako-Balazs.pdf
