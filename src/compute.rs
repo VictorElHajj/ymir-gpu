@@ -228,7 +228,9 @@ impl render_graph::Node for TerrainCompute {
                     _ => {}
                 }
             }
-            ComputeTerrainState::Update(_) => {}
+            ComputeTerrainState::Update(1) => self.state = ComputeTerrainState::Update(0),
+            ComputeTerrainState::Update(0) => self.state = ComputeTerrainState::Update(1),
+            ComputeTerrainState::Update(_) => unreachable!(),
         }
     }
 

@@ -58,7 +58,7 @@ fn load_terrainmap(
     asset_server: Res<AssetServer>,
     mut height_map_texture_handle: ResMut<HeightMapTextureHandle>,
 ) {
-    height_map_texture_handle.0 = asset_server.load("heightmap.png");
+    height_map_texture_handle.0 = asset_server.load("perlin.png");
 }
 
 fn check_for_loaded(
@@ -103,7 +103,7 @@ fn setup_sim(
             let h = heightmap.get_color_at(x, y).unwrap().to_linear().red;
             terrainmap
                 // Temporary 0.1 water everywhere
-                .set_color_at(x, y, Color::linear_rgba(h, h, 0., 0.))
+                .set_color_at(x, y, Color::linear_rgba(h, 0.0, 0., 0.))
                 .ok();
         }
     }
