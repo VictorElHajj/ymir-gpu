@@ -8,6 +8,10 @@ struct VertexOutput {
 
 @group(2) @binding(0) var heightmap: texture_2d<f32>;
 @group(2) @binding(1) var heightmap_sampler: sampler;
+@group(2) @binding(0) var flowmap: texture_2d<f32>;
+@group(2) @binding(1) var flowmap_sampler: sampler;
+@group(2) @binding(0) var velocitymap: texture_2d<f32>;
+@group(2) @binding(1) var velocitymap_sampler: sampler;
 
 const MaxTemp = 40;
 const MinTemp = -40;
@@ -26,12 +30,13 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     // Coriolis effect
     let wind_x_velocity: f32 = sin(2 * PI * abs(input.uv.y-0.5) * 3);
     return with_water(height, water);
+    //return vec4(sample.bbb, 1.0);
 }
 
 fn with_water(height: f32, water: f32) -> vec4<f32> {
     let water_color = vec3(0., 0., 0.5);
     let height_color = vec3(height);
-    let adjusted_water = min(0.5, max(0., water));
+    let adjusted_water = min(0.8, max(0., water));
     return vec4((1. - adjusted_water) * height_color + adjusted_water * water_color, 1.);
 }
 

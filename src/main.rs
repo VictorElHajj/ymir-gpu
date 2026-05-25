@@ -80,7 +80,7 @@ fn setup_sim(
     mut materials: ResMut<Assets<MapMaterial>>,
 ) {
     // Height map but uses three channels, keep R for the Height
-    // Zero G and B (will store Water and Sediment respetively)
+    // Zero, G and B (will store Water and Sediment respetively)
     let heightmap = images
         .get(&height_map_texture_handle.0)
         .expect("Heightmap not found with handle");
