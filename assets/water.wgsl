@@ -27,7 +27,7 @@ fn vertex(in: VertexInput) -> VertexOutput {
     // Offset 2 world units above terrain to prevent z-fighting
     out.clip_position = mesh_position_local_to_clip(
         get_world_from_local(in.instance_index),
-        vec4(in.position.x, terrain_height + water + 2.0, in.position.z, 1.0),
+        vec4(in.position.x, terrain_height + water, in.position.z, 1.0),
     );
     return out;
 }
