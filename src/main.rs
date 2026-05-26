@@ -20,8 +20,8 @@ mod water_material;
 
 const WINDOW_WIDTH: u32 = 2048;
 const WINDOW_HEIGHT: u32 = 1024;
-const TERRAINMAP_WIDTH: u32 = 4096;
-const TERRAINMAP_HEIGHT: u32 = 2048;
+const TERRAINMAP_WIDTH: u32 = 2048;
+const TERRAINMAP_HEIGHT: u32 = 1024;
 const TERRAIN_HEIGHT_SCALE: f32 = 200.0;
 
 // Toggle: true = procedural FBM noise, false = load perlin.png
@@ -85,7 +85,7 @@ fn check_for_loaded(
 
 fn generate_heightmap() -> Vec<f32> {
     let fbm = Fbm::<Perlin>::new(42);
-    let scale = 8.0 / TERRAINMAP_WIDTH as f64;
+    let scale = 2.0 / TERRAINMAP_WIDTH as f64;
     let mut heights = vec![0f32; (TERRAINMAP_WIDTH * TERRAINMAP_HEIGHT) as usize];
     let mut min_h = f64::MAX;
     let mut max_h = f64::MIN;
@@ -246,7 +246,7 @@ fn setup_sim(
             far: 100_000.0,
             ..default()
         }),
-        Transform::from_xyz(0.0, 2000.0, 3000.0).looking_at(Vec3::new(0.0, 200.0, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 1200.0, 300.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
         PanOrbitCamera::default(),
     ));
 
