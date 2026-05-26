@@ -16,15 +16,15 @@ const Width  = 2048;
 const Height = 1024;
 
 // Simulation parameters
-const TimeStep                 = 0.00125; // Setting this too high will break the simulation, too low and it will be very slow.
+const TimeStep                 = 0.00225; // Setting this too high will break the simulation, too low and it will be very slow.
 const FlowPipeCrossSectionArea = 1.;     // Should probably always be one when pixel:grid is 1:1
 const Gravity                  = 2000.;  // Higher values increase water flow (and therefore velocity, which affects carrying capacity etc)
-const SedimentCapacity         = 0.1;   // Multipler on how much sediment the water can hold
+const SedimentCapacity         = 0.2;   // Multipler on how much sediment the water can hold
 const DissolvingRate           = .4;     // [0, 1], where 0 means no dissolving and 1 means terrain will always be dissolved to reach capacity
-const DepositionRate           = .9;     // [0, 1], where 0 means no despositing and 1 means sediment will always be dropped to reach capacity
-const Evaporation              = 0.1;    // [0, 1] The percent of water evaporated each update.
-const Precipitation            = 0.03;   // [0, 1] Units of water added each update in all locations
-const MinTiltAngle             = 0.0001; // Minimum tilt angle floor for carrying capacity (~0.057°)
+const DepositionRate           = .6;     // [0, 1], where 0 means no despositing and 1 means sediment will always be dropped to reach capacity
+const Evaporation              = 0.05;    // [0, 1] The percent of water evaporated each update.
+const Precipitation            = 0.02;   // [0, 1] Units of water added each update in all locations
+const MinTiltAngle             = 0.001; // Minimum tilt angle floor for carrying capacity
 const Friction                 = 0.99;   // Damps wave oscillations each step so gravity-driven flow dominates
 const AngleOfRepose            = 35.0;   // Angle of repose in degrees, slopes steeper than this collapse
 const ThermalErosionRate       = 0.5;    // Fraction of excess slope transferred per step [0, 1]
