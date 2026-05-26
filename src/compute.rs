@@ -122,6 +122,7 @@ struct ComputeTerrainPipeline {
     erosion_deposition_pipeline: CachedComputePipelineId,
     sediment_transport_pipeline: CachedComputePipelineId,
     evaporation_pipeline: CachedComputePipelineId,
+    thermal_erosion_pipeline: CachedComputePipelineId,
 }
 
 impl FromWorld for ComputeTerrainPipeline {
@@ -181,6 +182,10 @@ impl FromWorld for ComputeTerrainPipeline {
         let evaporation_pipeline =
             pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
 
+        pipeline_descriptor.entry_point = Cow::from("_6_thermal_erosion");
+        let thermal_erosion_pipeline =
+            pipeline_cache.queue_compute_pipeline(pipeline_descriptor.clone());
+
         ComputeTerrainPipeline {
             texture_bind_group_layout,
             precipitation_pipeline,
@@ -190,6 +195,7 @@ impl FromWorld for ComputeTerrainPipeline {
             erosion_deposition_pipeline,
             sediment_transport_pipeline,
             evaporation_pipeline,
+            thermal_erosion_pipeline,
         }
     }
 }
@@ -274,6 +280,9 @@ impl render_graph::Node for TerrainCompute {
                     let evaporation_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.evaporation_pipeline)
                         .unwrap();
+                    let thermal_erosion_pipeline = pipeline_cache
+                        .get_compute_pipeline(pipeline_resource.thermal_erosion_pipeline)
+                        .unwrap();
 
                     for _ in 0..SIMULATION_PASSES_PER_FRAME {
                         macro_rules! dispatch {
@@ -295,6 +304,7 @@ impl render_graph::Node for TerrainCompute {
                         dispatch!(erosion_deposition_pipeline);
                         dispatch!(sediment_transport_pipeline);
                         dispatch!(evaporation_pipeline);
+                        dispatch!(thermal_erosion_pipeline);
                     }
                 }
             }

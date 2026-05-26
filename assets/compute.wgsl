@@ -17,7 +17,7 @@ const Height = 2048;
 // Simulation parameters
 const TimeStep = 0.00125; // Setting this too high will break the simulation, too low and it will be very slow.
 const FlowPipeCrossSectionArea = 1.; // Should probably always be one when pixel:grid is 1:1
-const Gravity = 9000.; // Higher values increase water flow (and therefore velocity, which affects carrying capacity etc)
+const Gravity = 2000.; // Higher values increase water flow (and therefore velocity, which affects carrying capacity etc)
 const SedimentCapacity = 0.05; // Multipler on how much sediment the water can hold
 const DissolvingRate = .4; // [0, 1], where 0 means no dissolving and 1 means terrain will always be dissolved to reach capacity
 const DepositionRate = .9; // [0, 1], where 0 means no despositing and 1 means sediment will always be dropped to reach capacity
@@ -25,6 +25,8 @@ const Evaporation = 0.2; // [0, 1] The percent of water evaporated each update.
 const Precipitation = 0.05; // [0, 1] Units of water added each update in all locations
 const MinTiltAngle = 0.00001; // Minimum tilt angle floor for carrying capacity (~0.057°)
 const Friction = 0.99; // Damps wave oscillations each step so gravity-driven flow dominates
+const AngleOfRepose = 35.0; // Angle of repose in degrees, slopes steeper than this collapse 
+const ThermalErosionRate = 0.5; // Fraction of excess slope transferred per step [0, 1]
 
 // Based on https://inria.hal.science/inria-00402079/document with side lengths and pipe length set to 1 and removed from calculations
 // TODO: When adapting the map to be a sphere projected onto a square the side lengths should added and set to the length between poitns on the sphere
@@ -305,6 +307,48 @@ fn tilt_angle(location: vec2<i32>, heightmap: texture_storage_2d<rgba32float, re
 
     // Compute tilt angle (alpha)
     return atan(sqrt(dz_dx * dz_dx + dz_dy * dz_dy));
+}
+
+// Slope collapse: steep walls shed material downhill until slope is below AngleOfRepose.
+// Each cell computes net gain/loss from all 4 neighbours using the frozen in_ state,
+// so there are no write conflicts in the parallel dispatch.
+@compute @workgroup_size(8, 8, 1)
+fn _6_thermal_erosion(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
+
+    var terrain = textureLoad(in_terrainmap, location);
+    let h = terrain.r;
+
+    var left_x = location.x - 1;
+    if (left_x < 0) { left_x = Width - 1; }
+    var right_x = location.x + 1;
+    if (right_x >= Width) { right_x = 0; }
+
+    let h_left  = textureLoad(in_terrainmap, vec2<i32>(left_x,       location.y    )).r;
+    let h_right = textureLoad(in_terrainmap, vec2<i32>(right_x,      location.y    )).r;
+    let h_up    = select(h, textureLoad(in_terrainmap, vec2<i32>(location.x, location.y + 1)).r, location.y + 1 < Height);
+    let h_down  = select(h, textureLoad(in_terrainmap, vec2<i32>(location.x, location.y - 1)).r, location.y - 1 >= 0);
+
+    // Convert angle of repose to a height-difference-per-pixel threshold: tan(angle)
+    // Pixel spacing is 1 world unit, so slope = dh/1 = dh, and atan(dh) is the actual angle.
+    let talus_slope = tan(radians(AngleOfRepose));
+
+    var delta = 0.0;
+    let neighbors = array<f32, 4>(h_left, h_right, h_up, h_down);
+    for (var i = 0; i < 4; i++) {
+        let dh = h - neighbors[i];
+        if (dh > talus_slope) {
+            // We are steeper than stable; shed half the excess (neighbour's pass sheds the other half)
+            delta -= ThermalErosionRate * (dh - talus_slope) * 0.5;
+        } else if (dh < -talus_slope) {
+            delta += ThermalErosionRate * (-dh - talus_slope) * 0.5;
+        }
+    }
+
+    terrain.r = max(0.0, h + delta);
+    textureStore(out_terrainmap, location, terrain);
+    textureStore(out_flowmap,    location, textureLoad(in_flowmap,    location));
+    textureStore(out_velocitymap, location, textureLoad(in_velocitymap, location));
 }
 
 fn bilinear_sample(
