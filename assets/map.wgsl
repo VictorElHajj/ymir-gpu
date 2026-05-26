@@ -36,7 +36,7 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 fn with_water(height: f32, water: f32) -> vec4<f32> {
     let water_color = vec3(0., 0., 0.5);
     let height_color = vec3(height);
-    let adjusted_water = min(0.8, max(0., water));
+    let adjusted_water = min(0.8, max(0., water * 5.));
     return vec4((1. - adjusted_water) * height_color + adjusted_water * water_color, 1.);
 }
 

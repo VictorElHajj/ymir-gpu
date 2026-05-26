@@ -20,5 +20,3 @@ I planned to expand this to include some basic initial map generation simulating
 4. Moisture map
 
 Biome map using Whittaker biome map
-
-Add pretty screenshots.

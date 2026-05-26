@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.15.1", features = ["file_watcher"] }
+noise = "0.9"

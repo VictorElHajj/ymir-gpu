@@ -7,6 +7,7 @@ use bevy::{
 };
 use compute::{ComputeTerrainImages, TerrainComputePlugin};
 use map_material::MapMaterial;
+use noise::{Fbm, NoiseFn, Perlin};
 mod compute;
 mod map_material;
 
@@ -14,6 +15,9 @@ const WINDOW_WIDTH: u32 = 2048;
 const WINDOW_HEIGHT: u32 = 1024;
 const TERRAINMAP_WIDTH: u32 = 4096;
 const TERRAINMAP_HEIGHT: u32 = 2048;
+
+// Toggle: true = procedural FBM noise, false = load perlin2.png
+const USE_FBM: bool = false;
 
 fn main() {
     App::new()
@@ -43,7 +47,6 @@ fn main() {
         .run();
 }
 
-// Wait for assets like terrainmap to be loaded before we enter Loaded state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, States, Default)]
 pub enum LoadingState {
     #[default]
@@ -58,20 +61,45 @@ fn load_terrainmap(
     asset_server: Res<AssetServer>,
     mut height_map_texture_handle: ResMut<HeightMapTextureHandle>,
 ) {
-    height_map_texture_handle.0 = asset_server.load("perlin.png");
+    if !USE_FBM {
+        height_map_texture_handle.0 = asset_server.load("perlin2.png");
+    }
 }
 
 fn check_for_loaded(
     height_map_texture_handle: Res<HeightMapTextureHandle>,
-    mut images: ResMut<Assets<Image>>,
+    images: Res<Assets<Image>>,
     mut next_state: ResMut<NextState<LoadingState>>,
 ) {
-    if images.get_mut(&height_map_texture_handle.0).is_some() {
-        next_state.set(LoadingState::Loaded)
+    if USE_FBM || images.get(&height_map_texture_handle.0).is_some() {
+        next_state.set(LoadingState::Loaded);
     }
 }
 
-// Load height map, create material and set up fullscreen quad
+fn generate_heightmap() -> Vec<f32> {
+    let fbm = Fbm::<Perlin>::new(42);
+    let scale = 8.0 / TERRAINMAP_WIDTH as f64;
+
+    let mut heights = vec![0f32; (TERRAINMAP_WIDTH * TERRAINMAP_HEIGHT) as usize];
+    let mut min_h = f64::MAX;
+    let mut max_h = f64::MIN;
+
+    for y in 0..TERRAINMAP_HEIGHT {
+        for x in 0..TERRAINMAP_WIDTH {
+            let h = fbm.get([x as f64 * scale, y as f64 * scale]);
+            heights[(y * TERRAINMAP_WIDTH + x) as usize] = h as f32;
+            if h < min_h { min_h = h; }
+            if h > max_h { max_h = h; }
+        }
+    }
+
+    let range = (max_h - min_h) as f32;
+    for h in &mut heights {
+        *h = (*h - min_h as f32) / range;
+    }
+    heights
+}
+
 fn setup_sim(
     mut commands: Commands,
     height_map_texture_handle: Res<HeightMapTextureHandle>,
@@ -79,11 +107,17 @@ fn setup_sim(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<MapMaterial>>,
 ) {
-    // Height map but uses three channels, keep R for the Height
-    // Zero, G and B (will store Water and Sediment respetively)
-    let heightmap = images
-        .get(&height_map_texture_handle.0)
-        .expect("Heightmap not found with handle");
+    let heights: Vec<f32> = if USE_FBM {
+        generate_heightmap()
+    } else {
+        let heightmap = images
+            .get(&height_map_texture_handle.0)
+            .expect("Heightmap not found with handle");
+        (0..TERRAINMAP_HEIGHT)
+            .flat_map(|y| (0..TERRAINMAP_WIDTH).map(move |x| (x, y)))
+            .map(|(x, y)| heightmap.get_color_at(x, y).unwrap().to_linear().red)
+            .collect()
+    };
 
     let mut terrainmap = Image::new_fill(
         Extent3d {
@@ -92,25 +126,23 @@ fn setup_sim(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        [0.0, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
+        [0.0f32, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
         TextureFormat::Rgba32Float,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
     terrainmap.texture_descriptor.usage =
         TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
-    for x in 0..TERRAINMAP_WIDTH {
-        for y in 0..TERRAINMAP_HEIGHT {
-            let h = heightmap.get_color_at(x, y).unwrap().to_linear().red;
+    for y in 0..TERRAINMAP_HEIGHT {
+        for x in 0..TERRAINMAP_WIDTH {
+            let h = heights[(y * TERRAINMAP_WIDTH + x) as usize];
             terrainmap
-                // Temporary 0.1 water everywhere
-                .set_color_at(x, y, Color::linear_rgba(h, 0.0, 0., 0.))
+                .set_color_at(x, y, Color::linear_rgba(h, 0.0, 0.0, 0.0))
                 .ok();
         }
     }
     let terrainmap_a = images.add(terrainmap.clone());
     let terrainmap_b = images.add(terrainmap);
 
-    // Pipe flow is stored in a four channel texture (left, top, right, bottom)
     let mut flowmap = Image::new_fill(
         Extent3d {
             width: TERRAINMAP_WIDTH,
@@ -118,7 +150,7 @@ fn setup_sim(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        [0.0, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
+        [0.0f32, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
         TextureFormat::Rgba32Float,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
@@ -127,7 +159,6 @@ fn setup_sim(
     let flowmap_a = images.add(flowmap.clone());
     let flowmap_b = images.add(flowmap);
 
-    // Velocity is stored ina three channel texture
     let mut velocitymap = Image::new_fill(
         Extent3d {
             width: TERRAINMAP_WIDTH,
@@ -135,7 +166,7 @@ fn setup_sim(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        [0.0, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
+        [0.0f32, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
         TextureFormat::Rgba32Float,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );

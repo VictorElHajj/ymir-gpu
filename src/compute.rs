@@ -16,7 +16,8 @@ use crate::{TERRAINMAP_HEIGHT, TERRAINMAP_WIDTH};
 
 const SHADER_ASSET_PATH: &str = "compute.wgsl";
 const SIZE: (u32, u32) = (TERRAINMAP_WIDTH, TERRAINMAP_HEIGHT);
-const WORKGROUP_SIZE: u32 = 1;
+const WORKGROUP_SIZE: u32 = 8;
+const SIMULATION_PASSES_PER_FRAME: u32 = 8;
 
 pub struct TerrainComputePlugin;
 
@@ -248,69 +249,53 @@ impl render_graph::Node for TerrainCompute {
             match self.state {
                 ComputeTerrainState::Loading => {}
                 ComputeTerrainState::Update(mut index) => {
-                    // This is an ugly mess, but my first attempt at a multiple dispatch compute shader
-                    // Need to switch the input and output textures for each pass
-                    // TODO: Ask for code review, learn how to make this better
-
                     let mut pass = render_context
                         .command_encoder()
                         .begin_compute_pass(&ComputePassDescriptor::default());
 
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let precipitation_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.precipitation_pipeline)
                         .unwrap();
-                    pass.set_pipeline(precipitation_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let outflow_flux_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.outflow_flux_pipeline)
                         .unwrap();
-                    pass.set_pipeline(outflow_flux_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let water_height_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.water_height_pipeline)
                         .unwrap();
-                    pass.set_pipeline(water_height_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let velocity_field_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.velocity_field_pipeline)
                         .unwrap();
-                    pass.set_pipeline(velocity_field_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let erosion_deposition_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.erosion_deposition_pipeline)
                         .unwrap();
-                    pass.set_pipeline(erosion_deposition_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let sediment_transport_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.sediment_transport_pipeline)
                         .unwrap();
-                    pass.set_pipeline(sediment_transport_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
-
-                    index = if index == 0 { 1 } else { 0 };
-                    pass.set_bind_group(0, &bind_groups.0[index], &[]);
                     let evaporation_pipeline = pipeline_cache
                         .get_compute_pipeline(pipeline_resource.evaporation_pipeline)
                         .unwrap();
-                    pass.set_pipeline(evaporation_pipeline);
-                    pass.dispatch_workgroups(SIZE.0 / WORKGROUP_SIZE, SIZE.1 / WORKGROUP_SIZE, 1);
+
+                    for _ in 0..SIMULATION_PASSES_PER_FRAME {
+                        macro_rules! dispatch {
+                            ($pipeline:expr) => {
+                                index = if index == 0 { 1 } else { 0 };
+                                pass.set_bind_group(0, &bind_groups.0[index], &[]);
+                                pass.set_pipeline($pipeline);
+                                pass.dispatch_workgroups(
+                                    SIZE.0 / WORKGROUP_SIZE,
+                                    SIZE.1 / WORKGROUP_SIZE,
+                                    1,
+                                );
+                            };
+                        }
+                        dispatch!(precipitation_pipeline);
+                        dispatch!(outflow_flux_pipeline);
+                        dispatch!(water_height_pipeline);
+                        dispatch!(velocity_field_pipeline);
+                        dispatch!(erosion_deposition_pipeline);
+                        dispatch!(sediment_transport_pipeline);
+                        dispatch!(evaporation_pipeline);
+                    }
                 }
             }
         }

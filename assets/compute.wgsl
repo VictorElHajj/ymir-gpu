@@ -5,7 +5,7 @@
 @group(0) @binding(4) var out_flowmap: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var out_velocitymap: texture_storage_2d<rgba32float, write>;
 
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
 }
 
@@ -15,15 +15,16 @@ const Height = 2048;
 
 
 // Simulation parameters
-const TimeStep = 0.1; // Setting this too high will break the simulation, too low and it will be very slow.
+const TimeStep = 0.00125; // Setting this too high will break the simulation, too low and it will be very slow.
 const FlowPipeCrossSectionArea = 1.; // Should probably always be one when pixel:grid is 1:1
-const Gravity = 9.; // Higher values increase water flow (and therefore velocity, which affects carrying capacity etc)
-const SedimentCapacity = 0.1; // Multipler on how much sediment the water can hold
-const DissolvingRate = .9; // [0, 1], where 0 means no dissolving and 1 means terrain will always be dissolved to reach capacity
+const Gravity = 9000.; // Higher values increase water flow (and therefore velocity, which affects carrying capacity etc)
+const SedimentCapacity = 0.05; // Multipler on how much sediment the water can hold
+const DissolvingRate = .4; // [0, 1], where 0 means no dissolving and 1 means terrain will always be dissolved to reach capacity
 const DepositionRate = .9; // [0, 1], where 0 means no despositing and 1 means sediment will always be dropped to reach capacity
-const Evaporation = 0.8; // [0, 1] The percent of water evaporated each update.
-const Precipitation = 0.01; // [0, 1] Units of water added each update in all locations
-const MinTiltAngle = 0.261799388;
+const Evaporation = 0.2; // [0, 1] The percent of water evaporated each update.
+const Precipitation = 0.05; // [0, 1] Units of water added each update in all locations
+const MinTiltAngle = 0.00001; // Minimum tilt angle floor for carrying capacity (~0.057°)
+const Friction = 0.99; // Damps wave oscillations each step so gravity-driven flow dominates
 
 // Based on https://inria.hal.science/inria-00402079/document with side lengths and pipe length set to 1 and removed from calculations
 // TODO: When adapting the map to be a sphere projected onto a square the side lengths should added and set to the length between poitns on the sphere
@@ -33,7 +34,7 @@ const MinTiltAngle = 0.261799388;
 // velocitymap: r = x velocity, g = y velocity
 
 // Water added from rain
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _1_precipitation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
 
@@ -44,7 +45,7 @@ fn _1_precipitation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 // Flux map, each location stores the water output to left/right/top/bottom location
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _2_1_outflow_flux(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
     let location_top = location + vec2(0, 1);
@@ -73,18 +74,18 @@ fn _2_1_outflow_flux(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var flow = textureLoad(in_flowmap, location);
     let ground_height_left = terrain_left.r;
     let water_left = terrain_left.g;
-    let flow_left = max(0., flow.r + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_left - water_left));
+    let flow_left = max(0., flow.r * Friction + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_left - water_left));
 
     let ground_height_right = terrain_right.r;
     let water_right = terrain_right.g;
-    let flow_right = max(0., flow.g + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_right - water_right));
+    let flow_right = max(0., flow.g * Friction + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_right - water_right));
 
     let ground_height_top = terrain_top.r;
     let water_top = terrain_top.g;
     // Boundary condition top
     var flow_top = 0.0;
     if (location_top.y < Height) {
-        flow_top = max(0., flow.b + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_top - water_top));
+        flow_top = max(0., flow.b * Friction + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_top - water_top));
     }
 
     let ground_height_bottom = terrain_bottom.r;
@@ -92,7 +93,7 @@ fn _2_1_outflow_flux(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var flow_bottom = 0.0;
     // Boundary condition top
     if (location_bottom.y >= 0) {
-        flow_bottom = max(0., flow.a + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_bottom - water_bottom));
+        flow_bottom = max(0., flow.a * Friction + TimeStep * FlowPipeCrossSectionArea * Gravity * (ground_height + water - ground_height_bottom - water_bottom));
     }
 
     // New flow divided by K to ensure outflow is never more than current water amount
@@ -106,7 +107,7 @@ fn _2_1_outflow_flux(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
 }
 
 // Use updated flux map to update water height
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _2_2_water_height(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
     let location_top = location + vec2(0, 1);
@@ -140,12 +141,15 @@ fn _2_2_water_height(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     var terrain = textureLoad(in_terrainmap, location);
     let flow = textureLoad(in_flowmap, location);
     terrain.g += TimeStep * (flow_left.g + flow_right.r + flow_bottom.b + flow_top.a - (flow.r + flow.g + flow.b + flow.a));
+    if (terrain.g < 1e-5) {
+        terrain.g = 0.0;
+    } 
     textureStore(out_terrainmap, location, terrain);
     textureStore(out_flowmap, location, flow);
 }
 
 // Use updated water height to update velocity field map
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _2_3_velocity_field(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
     let location_top = location + vec2(0, 1);
@@ -176,21 +180,26 @@ fn _2_3_velocity_field(@builtin(global_invocation_id) invocation_id: vec3<u32>) 
         flow_bottom = textureLoad(in_flowmap, location_bottom);
     }
 
-    // Input from the left minus output to the left plus output to the right minus input from the right
-    let velocity_x = (flow_left.g - flow.r + flow.g - flow_right.r) / 2;
-    // Input from the top minus output to the top plus output to the bottom minus input from the bottom
-    // l r t b
-    let velocity_y = (flow_top.a - flow.b + flow.a - flow_bottom.b) / 2;
-
     var terrain = textureLoad(in_terrainmap, location);
+    let water_depth = max(terrain.g, 0.01);
+    // Net rightward flux through left and right faces, divided by water depth (paper eqs. 8-9)
+    let velocity_x = (flow_left.g - flow.r + flow.g - flow_right.r) / (2.0 * water_depth);
+    // Net upward flux through bottom and top faces, divided by water depth (paper eqs. 8-9)
+    let velocity_y = (flow_bottom.b - flow.a + flow.b - flow_top.a) / (2.0 * water_depth);
     textureStore(out_terrainmap, location, terrain);
     textureStore(out_flowmap, location, flow);
-    textureStore(out_velocitymap, location, vec4(velocity_x, velocity_y, 0.0, 0.0));
+
+    // Velocity does not matter if there is no water
+    if (terrain.g < 1e-5) {
+        textureStore(out_velocitymap, location, vec4(0.0));
+    } else {
+        textureStore(out_velocitymap, location, vec4(velocity_x, velocity_y, 0.0, 0.0));
+    }
 }
 
 // Calculate carrying capacity using graidnet and velocity, compare with held sediment and
 // erode or dispose
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _3_erosion_deposition(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
     var terrain = textureLoad(in_terrainmap, location);
@@ -198,7 +207,8 @@ fn _3_erosion_deposition(@builtin(global_invocation_id) invocation_id: vec3<u32>
     let velocity = textureLoad(in_velocitymap, location);
 
     // TODO: Add optional minimum carrying capacity for flat terrains
-    let carrying_capacity = SedimentCapacity * sin(min(MinTiltAngle, tilt_angle(location, in_terrainmap))) * length(velocity);
+    let carrying_capacity = SedimentCapacity * sin(max(MinTiltAngle, tilt_angle(location, in_terrainmap))) * length(velocity.xy * TimeStep);
+    terrain.a = sin(tilt_angle(location, in_terrainmap));
     var suspended_sediment= terrain.b;
     var terrain_height = terrain.r;
 
@@ -222,7 +232,7 @@ fn _3_erosion_deposition(@builtin(global_invocation_id) invocation_id: vec3<u32>
     textureStore(out_velocitymap, location, velocity);
 }
 
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _4_sediment_transport(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
     var terrain = textureLoad(in_terrainmap, location);
@@ -237,56 +247,64 @@ fn _4_sediment_transport(@builtin(global_invocation_id) invocation_id: vec3<u32>
     textureStore(out_velocitymap, location, velocity);
 }
 
-@compute @workgroup_size(1, 1, 1)
+@compute @workgroup_size(8, 8, 1)
 fn _5_evaporation(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let location = vec2<i32>(i32(invocation_id.x), i32(invocation_id.y));
 
-    var terrainmap = textureLoad(in_terrainmap, location);
-    var flowmap = textureLoad(in_flowmap, location);
-    var velocity = textureLoad(in_velocitymap, location);
-
-    var water = terrainmap.g;
-    water *= 1 - Evaporation * TimeStep;
-    terrainmap.g = water;
-    textureStore(out_terrainmap, location, terrainmap);
+    var terrain = textureLoad(in_terrainmap, location);
+    terrain.g *= 1 - Evaporation * TimeStep;
+    if (location.y <= 0 || location.y >= Height - 1) {
+        terrain.g = 0.0;
+    }
+    textureStore(out_terrainmap, location, terrain);
 
     // All stages need to write all textures so that swapping can work properly
-    textureStore(out_flowmap, location, flowmap);
+    let velocity = textureLoad(in_velocitymap, location);
+    let flow = textureLoad(in_flowmap, location);
+    textureStore(out_flowmap, location, flow);
     textureStore(out_velocitymap, location, velocity);
 }
 
 fn tilt_angle(location: vec2<i32>, heightmap: texture_storage_2d<rgba32float, read>) -> f32 {
-    let location_top = location + vec2(0, 1);
-    let location_bottom = location + vec2(0, -1);
-    // left and right loop around
-    var left_pos = location.x - 1;
-    if (left_pos < 0) {
-        left_pos = Width-1;
+    // Get neighboring positions with wrapping on x
+    let x = location.x;
+    let y = location.y;
+
+    var left_x = x - 1;
+    if (left_x < 0) {
+        left_x = Width - 1;
     }
-    var right_pos = location.x + 1;
-    if (right_pos >= Width) {
-        right_pos = 0;
+    var right_x = x + 1;
+    if (right_x >= Width) {
+        right_x = 0;
     }
-    let location_left = vec2(left_pos, location.y);
-    let location_right = vec2(right_pos, location.y);
 
-    let height_left = textureLoad(heightmap, location_left).r;
-    let height_right = textureLoad(heightmap, location_right).r;
-    let height_bottom = textureLoad(heightmap, location_bottom).r;
-    let height_top = textureLoad(heightmap, location_top).r;
+    let up_y = y + 1;
+    let down_y = y - 1;
 
-    // Convert to gradient vectors in x and y directions
-    let dx = vec3<f32>(1.0, 0.0, height_right - height_left);
-    let dy = vec3<f32>(0.0, 1.0, height_top - height_bottom);
+    // Sample terrain heights
+    let h_center = textureLoad(heightmap, location).r;
+    let h_left = textureLoad(heightmap, vec2<i32>(left_x, y)).r;
+    let h_right = textureLoad(heightmap, vec2<i32>(right_x, y)).r;
+    var h_up = 0.0;
+    if (up_y < Height) {
+        h_up = textureLoad(heightmap, vec2<i32>(x, up_y)).r;
+    } else {
+        h_up = h_center;
+    }
+    var h_down = 0.0;
+    if (down_y >= 0) {
+        h_down = textureLoad(heightmap, vec2<i32>(x, down_y)).r;
+    } else {
+        h_down = h_center;
+    }
 
-    // Get surface normal from cross product of gradients
-    let normal = normalize(cross(dy, dx));
+    // Central differences for slope
+    let dz_dx = (h_right - h_left) * 0.5;
+    let dz_dy = (h_up - h_down) * 0.5;
 
-    // Compare with up vector (z-up assumed; for y-up use vec3(0.0, 1.0, 0.0))
-    let up = vec3<f32>(0.0, 0.0, 1.0);
-    let angle = acos(clamp(dot(normal, up), -1.0, 1.0));
-
-    return angle;
+    // Compute tilt angle (alpha)
+    return atan(sqrt(dz_dx * dz_dx + dz_dy * dz_dy));
 }
 
 fn bilinear_sample(
