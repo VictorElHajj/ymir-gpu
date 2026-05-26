@@ -54,10 +54,12 @@ impl Plugin for TerrainComputePlugin {
 #[derive(Resource, Clone, ExtractResource)]
 pub struct ComputeTerrainImages {
     pub terrainmap_a: Handle<Image>,
-    pub flowmap_a: Handle<Image>,
+    pub flowmap_cardinal_a: Handle<Image>,
+    pub flowmap_diagonal_a: Handle<Image>,
     pub velocitymap_a: Handle<Image>,
     pub terrainmap_b: Handle<Image>,
-    pub flowmap_b: Handle<Image>,
+    pub flowmap_cardinal_b: Handle<Image>,
+    pub flowmap_diagonal_b: Handle<Image>,
     pub velocitymap_b: Handle<Image>,
 }
 
@@ -71,41 +73,42 @@ fn prepare_bind_group(
     comptue_terrain_images: Res<ComputeTerrainImages>,
     render_device: Res<RenderDevice>,
 ) {
-    let terrainmap_a = gpu_images
-        .get(&comptue_terrain_images.terrainmap_a)
-        .unwrap();
-    let flowmap_a = gpu_images.get(&comptue_terrain_images.flowmap_a).unwrap();
-    let velocitymap_a = gpu_images
-        .get(&comptue_terrain_images.velocitymap_a)
-        .unwrap();
-    let terrainmap_b = gpu_images
-        .get(&comptue_terrain_images.terrainmap_b)
-        .unwrap();
-    let flowmap_b = gpu_images.get(&comptue_terrain_images.flowmap_b).unwrap();
-    let velocitymap_b = gpu_images
-        .get(&comptue_terrain_images.velocitymap_b)
-        .unwrap();
+    let terrainmap_a       = gpu_images.get(&comptue_terrain_images.terrainmap_a).unwrap();
+    let flowmap_cardinal_a = gpu_images.get(&comptue_terrain_images.flowmap_cardinal_a).unwrap();
+    let flowmap_diagonal_a = gpu_images.get(&comptue_terrain_images.flowmap_diagonal_a).unwrap();
+    let velocitymap_a      = gpu_images.get(&comptue_terrain_images.velocitymap_a).unwrap();
+    let terrainmap_b       = gpu_images.get(&comptue_terrain_images.terrainmap_b).unwrap();
+    let flowmap_cardinal_b = gpu_images.get(&comptue_terrain_images.flowmap_cardinal_b).unwrap();
+    let flowmap_diagonal_b = gpu_images.get(&comptue_terrain_images.flowmap_diagonal_b).unwrap();
+    let velocitymap_b      = gpu_images.get(&comptue_terrain_images.velocitymap_b).unwrap();
+
+    // bind_group_0: read from _a, write to _b
     let bind_group_0 = render_device.create_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
         &BindGroupEntries::sequential((
             &terrainmap_a.texture_view,
-            &flowmap_a.texture_view,
+            &flowmap_cardinal_a.texture_view,
+            &flowmap_diagonal_a.texture_view,
             &velocitymap_a.texture_view,
             &terrainmap_b.texture_view,
-            &flowmap_b.texture_view,
+            &flowmap_cardinal_b.texture_view,
+            &flowmap_diagonal_b.texture_view,
             &velocitymap_b.texture_view,
         )),
     );
+    // bind_group_1: read from _b, write to _a
     let bind_group_1 = render_device.create_bind_group(
         None,
         &pipeline.texture_bind_group_layout,
         &BindGroupEntries::sequential((
             &terrainmap_b.texture_view,
-            &flowmap_b.texture_view,
+            &flowmap_cardinal_b.texture_view,
+            &flowmap_diagonal_b.texture_view,
             &velocitymap_b.texture_view,
             &terrainmap_a.texture_view,
-            &flowmap_a.texture_view,
+            &flowmap_cardinal_a.texture_view,
+            &flowmap_diagonal_a.texture_view,
             &velocitymap_a.texture_view,
         )),
     );
@@ -133,9 +136,13 @@ impl FromWorld for ComputeTerrainPipeline {
             &BindGroupLayoutEntries::sequential(
                 ShaderStages::COMPUTE,
                 (
+                    // in_terrainmap, in_flowmap_cardinal, in_flowmap_diagonal, in_velocitymap
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
+                    texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::ReadOnly),
+                    // out_terrainmap, out_flowmap_cardinal, out_flowmap_diagonal, out_velocitymap
+                    texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),
                     texture_storage_2d(TextureFormat::Rgba32Float, StorageTextureAccess::WriteOnly),

@@ -193,7 +193,7 @@ fn setup_sim(
     let terrainmap_a = images.add(terrainmap.clone());
     let terrainmap_b = images.add(terrainmap);
 
-    let mut flowmap = Image::new_fill(
+    let zero_map = Image::new_fill(
         Extent3d {
             width: TERRAINMAP_WIDTH,
             height: TERRAINMAP_HEIGHT,
@@ -204,24 +204,21 @@ fn setup_sim(
         TextureFormat::Rgba32Float,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
-    flowmap.texture_descriptor.usage =
+    let storage_usage =
         TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
-    let flowmap_a = images.add(flowmap.clone());
-    let flowmap_b = images.add(flowmap);
 
-    let mut velocitymap = Image::new_fill(
-        Extent3d {
-            width: TERRAINMAP_WIDTH,
-            height: TERRAINMAP_HEIGHT,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        [0.0f32, 0.0, 0.0, 0.0].map(f32::to_le_bytes).as_flattened(),
-        TextureFormat::Rgba32Float,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    velocitymap.texture_descriptor.usage =
-        TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
+    let mut flowmap_cardinal = zero_map.clone();
+    flowmap_cardinal.texture_descriptor.usage = storage_usage;
+    let flowmap_cardinal_a = images.add(flowmap_cardinal.clone());
+    let flowmap_cardinal_b = images.add(flowmap_cardinal);
+
+    let mut flowmap_diagonal = zero_map.clone();
+    flowmap_diagonal.texture_descriptor.usage = storage_usage;
+    let flowmap_diagonal_a = images.add(flowmap_diagonal.clone());
+    let flowmap_diagonal_b = images.add(flowmap_diagonal);
+
+    let mut velocitymap = zero_map;
+    velocitymap.texture_descriptor.usage = storage_usage;
     let velocitymap_a = images.add(velocitymap.clone());
     let velocitymap_b = images.add(velocitymap);
 
@@ -255,10 +252,12 @@ fn setup_sim(
 
     commands.insert_resource(ComputeTerrainImages {
         terrainmap_a,
-        flowmap_a,
+        flowmap_cardinal_a,
+        flowmap_diagonal_a,
         velocitymap_a,
         terrainmap_b,
-        flowmap_b,
+        flowmap_cardinal_b,
+        flowmap_diagonal_b,
         velocitymap_b,
     });
 }
