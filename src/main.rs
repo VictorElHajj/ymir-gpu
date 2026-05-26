@@ -1,23 +1,31 @@
 use bevy::{
     asset::RenderAssetUsages,
-    math::vec3,
+    pbr::MaterialPlugin,
     prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
-    sprite::Material2dPlugin,
+    render::{
+        mesh::Indices,
+        render_resource::{
+            Extent3d, PrimitiveTopology, TextureDimension, TextureFormat, TextureUsages,
+        },
+    },
 };
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use compute::{ComputeTerrainImages, TerrainComputePlugin};
-use map_material::MapMaterial;
 use noise::{Fbm, NoiseFn, Perlin};
+use terrain_material::TerrainMaterial;
+use water_material::WaterMaterial;
 mod compute;
-mod map_material;
+mod terrain_material;
+mod water_material;
 
 const WINDOW_WIDTH: u32 = 2048;
 const WINDOW_HEIGHT: u32 = 1024;
 const TERRAINMAP_WIDTH: u32 = 4096;
 const TERRAINMAP_HEIGHT: u32 = 2048;
+const TERRAIN_HEIGHT_SCALE: f32 = 200.0;
 
-// Toggle: true = procedural FBM noise, false = load perlin2.png
-const USE_FBM: bool = false;
+// Toggle: true = procedural FBM noise, false = load perlin.png
+const USE_FBM: bool = true;
 
 fn main() {
     App::new()
@@ -33,8 +41,10 @@ fn main() {
                     ..default()
                 })
                 .set(ImagePlugin::default_nearest()),
-            Material2dPlugin::<MapMaterial>::default(),
+            MaterialPlugin::<TerrainMaterial>::default(),
+            MaterialPlugin::<WaterMaterial>::default(),
             TerrainComputePlugin,
+            PanOrbitCameraPlugin,
         ))
         .init_state::<LoadingState>()
         .init_resource::<HeightMapTextureHandle>()
@@ -57,21 +67,18 @@ pub enum LoadingState {
 #[derive(Resource, Default)]
 struct HeightMapTextureHandle(Handle<Image>);
 
-fn load_terrainmap(
-    asset_server: Res<AssetServer>,
-    mut height_map_texture_handle: ResMut<HeightMapTextureHandle>,
-) {
+fn load_terrainmap(asset_server: Res<AssetServer>, mut handle: ResMut<HeightMapTextureHandle>) {
     if !USE_FBM {
-        height_map_texture_handle.0 = asset_server.load("perlin2.png");
+        handle.0 = asset_server.load("perlin.png");
     }
 }
 
 fn check_for_loaded(
-    height_map_texture_handle: Res<HeightMapTextureHandle>,
+    handle: Res<HeightMapTextureHandle>,
     images: Res<Assets<Image>>,
     mut next_state: ResMut<NextState<LoadingState>>,
 ) {
-    if USE_FBM || images.get(&height_map_texture_handle.0).is_some() {
+    if USE_FBM || images.get(&handle.0).is_some() {
         next_state.set(LoadingState::Loaded);
     }
 }
@@ -79,20 +86,21 @@ fn check_for_loaded(
 fn generate_heightmap() -> Vec<f32> {
     let fbm = Fbm::<Perlin>::new(42);
     let scale = 8.0 / TERRAINMAP_WIDTH as f64;
-
     let mut heights = vec![0f32; (TERRAINMAP_WIDTH * TERRAINMAP_HEIGHT) as usize];
     let mut min_h = f64::MAX;
     let mut max_h = f64::MIN;
-
     for y in 0..TERRAINMAP_HEIGHT {
         for x in 0..TERRAINMAP_WIDTH {
             let h = fbm.get([x as f64 * scale, y as f64 * scale]);
             heights[(y * TERRAINMAP_WIDTH + x) as usize] = h as f32;
-            if h < min_h { min_h = h; }
-            if h > max_h { max_h = h; }
+            if h < min_h {
+                min_h = h;
+            }
+            if h > max_h {
+                max_h = h;
+            }
         }
     }
-
     let range = (max_h - min_h) as f32;
     for h in &mut heights {
         *h = (*h - min_h as f32) / range;
@@ -100,19 +108,61 @@ fn generate_heightmap() -> Vec<f32> {
     heights
 }
 
+fn create_terrain_mesh() -> Mesh {
+    let w = TERRAINMAP_WIDTH;
+    let h = TERRAINMAP_HEIGHT;
+    let x_quads = w - 1;
+    let z_quads = h - 1;
+
+    let vert_count = (w * h) as usize;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(vert_count);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(vert_count);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(vert_count);
+    let mut indices: Vec<u32> = Vec::with_capacity((x_quads * z_quads * 6) as usize);
+
+    for z in 0..h {
+        for x in 0..w {
+            // World XZ: pixel (0,0) → (-W/2, -H/2), pixel (W-1,H-1) → (W/2-1, H/2-1)
+            positions.push([x as f32 - w as f32 / 2.0, 0.0, z as f32 - h as f32 / 2.0]);
+            normals.push([0.0, 1.0, 0.0]);
+            // UV samples the centre of each texel
+            uvs.push([(x as f32 + 0.5) / w as f32, (z as f32 + 0.5) / h as f32]);
+        }
+    }
+
+    for z in 0..z_quads {
+        for x in 0..x_quads {
+            let tl = z * w + x;
+            let tr = tl + 1;
+            let bl = tl + w;
+            let br = bl + 1;
+            indices.extend_from_slice(&[tl, bl, tr, tr, bl, br]);
+        }
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
 fn setup_sim(
     mut commands: Commands,
-    height_map_texture_handle: Res<HeightMapTextureHandle>,
+    handle: Res<HeightMapTextureHandle>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<MapMaterial>>,
+    mut terrain_materials: ResMut<Assets<TerrainMaterial>>,
+    mut water_materials: ResMut<Assets<WaterMaterial>>,
 ) {
-    let heights: Vec<f32> = if USE_FBM {
+    let raw_heights: Vec<f32> = if USE_FBM {
         generate_heightmap()
     } else {
-        let heightmap = images
-            .get(&height_map_texture_handle.0)
-            .expect("Heightmap not found with handle");
+        let heightmap = images.get(&handle.0).expect("Heightmap not found");
         (0..TERRAINMAP_HEIGHT)
             .flat_map(|y| (0..TERRAINMAP_WIDTH).map(move |x| (x, y)))
             .map(|(x, y)| heightmap.get_color_at(x, y).unwrap().to_linear().red)
@@ -134,7 +184,7 @@ fn setup_sim(
         TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING;
     for y in 0..TERRAINMAP_HEIGHT {
         for x in 0..TERRAINMAP_WIDTH {
-            let h = heights[(y * TERRAINMAP_WIDTH + x) as usize];
+            let h = raw_heights[(y * TERRAINMAP_WIDTH + x) as usize] * TERRAIN_HEIGHT_SCALE;
             terrainmap
                 .set_color_at(x, y, Color::linear_rgba(h, 0.0, 0.0, 0.0))
                 .ok();
@@ -175,12 +225,34 @@ fn setup_sim(
     let velocitymap_a = images.add(velocitymap.clone());
     let velocitymap_b = images.add(velocitymap);
 
-    let quad_handle = meshes.add(Rectangle::new(2., 1.));
-    let material_handle = materials.add(MapMaterial {
-        terrainmap: terrainmap_a.clone(),
-        flowmap: flowmap_a.clone(),
-        velocitymap: velocitymap_a.clone(),
-    });
+    let grid = meshes.add(create_terrain_mesh());
+
+    commands.spawn((
+        Mesh3d(grid.clone()),
+        MeshMaterial3d(terrain_materials.add(TerrainMaterial {
+            terrainmap: terrainmap_a.clone(),
+        })),
+    ));
+
+    commands.spawn((
+        Mesh3d(grid),
+        MeshMaterial3d(water_materials.add(WaterMaterial {
+            terrainmap: terrainmap_a.clone(),
+        })),
+    ));
+
+    commands.spawn((
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: std::f32::consts::FRAC_PI_3,
+            near: 1.0,
+            far: 100_000.0,
+            ..default()
+        }),
+        Transform::from_xyz(0.0, 2000.0, 3000.0).looking_at(Vec3::new(0.0, 200.0, 0.0), Vec3::Y),
+        PanOrbitCamera::default(),
+    ));
+
     commands.insert_resource(ComputeTerrainImages {
         terrainmap_a,
         flowmap_a,
@@ -189,10 +261,4 @@ fn setup_sim(
         flowmap_b,
         velocitymap_b,
     });
-    commands.spawn((
-        Mesh2d(quad_handle),
-        MeshMaterial2d(material_handle),
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(vec3(1024., 1024., 1.)),
-    ));
-    commands.spawn(Camera2d);
 }

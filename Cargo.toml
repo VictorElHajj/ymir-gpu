@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.15.1", features = ["file_watcher"] }
+bevy_panorbit_camera = "0.25"
 noise = "0.9"
